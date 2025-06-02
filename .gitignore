@@ -1,2 +1,5 @@
 # ignore the virtualenv folder
 venvst/
+
+#ignore config with api keys
+config/
