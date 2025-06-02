@@ -3,3 +3,6 @@ venvst/
 
 #ignore config with api keys
 config/
+
+#data files
+project_data
