@@ -15,7 +15,7 @@ import os
 # Add the parent directory (project root) to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from data.yf_data_extract import yf_ticker_data_extraction # Now this would work
-from data.polygon_data_extract import fetch_polygon_news_df
+from data.polygon_data_extract import *
 
 # Configuration (ideally from config.py or .env)
 try:
@@ -159,8 +159,9 @@ def fetch_and_update_price_data(ticker, overall_start_date_str, end_date_str):
 
 def fetch_and_update_sentiment_data(ticker, overall_start_date_str, end_date_str):
     """Fetches and updates sentiment data for a single ticker."""
+    print(f"DEBUG: Using POLYGON_API_KEY: {POLYGON_API_KEY[:5]}... (masked)") # Print first 5 chars
     if not POLYGON_API_KEY:
-        print(f"Skipping sentiment data for {ticker}: POLYGON_API_KEY not set.")
+        print(f"CRITICAL DEBUG: POLYGON_API_KEY is None or empty here for {ticker}!")
         return
     print(f"\n--- Processing Sentiment Data for {ticker} ---")
     file_path = os.path.join(SENTIMENT_DATA_PATH, f"{ticker}_sentiment.parquet")
@@ -210,6 +211,11 @@ def fetch_and_update_sentiment_data(ticker, overall_start_date_str, end_date_str
             limit=NEWS_FETCH_LIMIT_PER_REQUEST,
             delta_days=NEWS_DAYS_CHUNK # Use your chunking strategy
         )
+        print(f"DEBUG: Shape of raw_news_list_df for {ticker}: {raw_news_list_df.shape}")
+        if not raw_news_list_df.empty:
+            print(f"DEBUG: raw_news_list_df head for {ticker}:\n{raw_news_list_df.head()}")
+        else:
+            print(f"DEBUG: raw_news_list_df is EMPTY for {ticker} after fetch_polygon_news_df.")
 
         if raw_news_list_df.empty:
             print(f"No new news articles found for {ticker} in the specified range.")
@@ -223,6 +229,15 @@ def fetch_and_update_sentiment_data(ticker, overall_start_date_str, end_date_str
             if not existing_df.empty:
                  save_df_to_parquet(existing_df, file_path)
             return
+        print(f"DEBUG: Shape of new_sentiment_df for {ticker}: {new_sentiment_df.shape}")
+
+        if not new_sentiment_df.empty:
+            print(f"DEBUG: new_sentiment_df head for {ticker}:\n{new_sentiment_df.head()}")
+            print(f"DEBUG: new_sentiment_df index type: {type(new_sentiment_df.index)}")
+            if isinstance(new_sentiment_df.index, pd.DatetimeIndex):
+                print(f"DEBUG: new_sentiment_df index min/max: {new_sentiment_df.index.min()} / {new_sentiment_df.index.max()}")
+        else:
+            print(f"DEBUG: new_sentiment_df is EMPTY for {ticker} after process_news_data.")
 
         # Set 'date' as index (it should be datetime from process_news_data)
         if 'date' in new_sentiment_df.columns:
@@ -273,7 +288,7 @@ if __name__ == "__main__":
         fetch_and_update_price_data(ticker_symbol, OVERALL_HISTORICAL_START_DATE, effective_end_date)
         # Add a small delay to be kind to APIs, especially if Polygon news is fetched per ticker
         time.sleep(1) # Adjust as needed, Polygon news might need longer if not using bulk methods
-        fetch_and_update_sentiment_data(ticker_symbol, OVERALL_HISTORICAL_START_DATE, effective_end_date)
+        #fetch_and_update_sentiment_data(ticker_symbol, OVERALL_HISTORICAL_START_DATE, effective_end_date)
         time.sleep(1) # General courtesy delay
 
 
