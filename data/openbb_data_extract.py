@@ -239,6 +239,23 @@ def obb_get_earnings_calendar(country: str = "us"):
     except Exception as e:
         print(f"Error fetching earnings calendar for {country}: {e}")
         return pd.DataFrame()
+    
+def obb_get_analyst_estimates(symbol: str, provider: str = "yfinance"):
+    print(f"Fetching analyst estimates for {symbol} (Provider: {provider})")
+    try:
+        # obb.equity.estimates.consensus is often the command
+        estimates_obj = obb.equity.estimates.consensus(symbol=symbol, provider=provider)
+        df = process_openbb_object(estimates_obj)
+        # This data is usually not time-series with a date index from yfinance for consensus
+        # It's often a snapshot. process_openbb_object might not set an index.
+        return df
+    except Exception as e:
+        print(f"Error fetching analyst estimates for {symbol} with {provider}: {e}")
+        try:
+            supported = obb.coverage.providers(command="equity.estimates.consensus")
+            print(f"Hint: Supported providers by OBB for equity.estimates.consensus: {supported}")
+        except: pass
+        return pd.DataFrame()
 
 # --- ETF-specific Functions ---
 
@@ -400,7 +417,6 @@ def obb_get_google_trends(keyword: str, start_date: str, end_date: str):
             else:
                 print(f"Error fetching Google Trends directly for '{keyword}' using pytrends: {e_direct}")
             return pd.DataFrame()
-
 
 
 # --- Example Usage (remains the same) ---

@@ -1,120 +1,150 @@
 # data_ingestion_main.py
 import os
-import sys
-
 import pandas as pd
 from datetime import datetime, timedelta
 import time
-from typing import Callable, Optional, Dict, Any
-import yaml
-import argparse
+import sys
+from typing import Callable, Optional, Dict, List, Any # Ensure these are imported
+import argparse # For command-line arguments
+import yaml     # For loading YAML config
 
-
-#yfinance
-# Add the parent directory (project root) to the path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from data.yf_data_extract import yf_ticker_data_extraction # Now this would work
-from data.polygon_data_extract import *
-
-#obb
-from data.openbb_data_extract import *
-
-# --- Project Setup ---
+# --- Dynamic Project Root and System Path ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
-try:
-    from config.config import FMP_API_KEY
-except ImportError:
-    print("Warning: config.py not found or FMP_API_KEY not set. News fetching will be limited.")
-    FMP_API_KEY = None
-    
+# --- Import Custom Data Extraction Modules ---
+from data.yf_data_extract import yf_ticker_data_extraction
+from data.polygon_data_extract import fetch_polygon_news_df, process_news_data
+from data.openbb_data_extract import (
+    obb_get_company_profile, obb_get_financial_ratios, obb_get_income_statement,
+    obb_get_balance_sheet, obb_get_cash_flow, obb_get_key_metrics, obb_get_dividends,
+    obb_get_analyst_estimates, # Make sure this wrapper is defined in openbb_data_extract.py
+    obb_get_etf_info, obb_get_etf_holdings, obb_get_etf_country_exposure,
+    obb_get_etf_sector_exposure,
+    obb_get_google_trends
+)
 
-# --- Configuration ---
+# --- Load API Keys (e.g., Polygon) ---
 try:
     from config.config import POLYGON_API_KEY
 except ImportError:
-    print("Warning: config.py not found or POLYGON_API_KEY not set. News fetching will be limited.")
+    print("Warning: config.config.py not found or POLYGON_API_KEY not set. News fetching will be limited.")
     POLYGON_API_KEY = None
+# Note: FMP API Key is handled within openbb_data_extract.py by setting obb.user.credentials
 
+# --- Core Configuration Constants (Paths & Parameters) ---
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 TICKER_UNIVERSE_FILE = os.path.join(CONFIG_DIR, "ticker_universe.txt")
-TASKS_CONFIG_FILE = os.path.join(CONFIG_DIR, "tasks_config.yaml") # New YAML config file
+TASKS_CONFIG_FILE = os.path.join(CONFIG_DIR, "tasks_config.yaml")
 
 DATA_BASE_PATH = os.path.join(PROJECT_ROOT, "project_data")
 PRICE_DATA_PATH = os.path.join(DATA_BASE_PATH, "price_data")
 SENTIMENT_DATA_PATH = os.path.join(DATA_BASE_PATH, "sentiment_data")
 TRENDS_DATA_PATH = os.path.join(DATA_BASE_PATH, "trends_data")
-
 FUNDAMENTALS_DATA_PATH = os.path.join(DATA_BASE_PATH, "fundamentals_data")
+ETF_DATA_SUBPATH_NAME = "etf_data" # Used for constructing ETF subfolder paths
 
-# --- Define Python Path Constants that YAML will refer to by KEY ---
-# This maps keys used in YAML's 'data_type_paths_keys' to actual Python path variables
-PYTHON_PATH_MAP = {
-    "PROFILE_DATA_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "profile"),
-    "RATIOS_DATA_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "ratios"),
-    "INCOME_DATA_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "income_statements"),
-    "BALANCE_SHEET_DATA_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "balance_sheets"),
-    "CASH_FLOW_DATA_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "cash_flows"),
-    "KEY_METRICS_DATA_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "key_metrics"),
-    "DIVIDENDS_DATA_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "dividends"),
-    "ETF_INFO_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "etf_data", "info"), # Adjusted for subfolder
-    "ETF_HOLDINGS_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "etf_data", "holdings"),
-    "ETF_COUNTRY_EXPOSURE_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "etf_data", "country_exposure"),
-    "ETF_SECTOR_EXPOSURE_PATH_KEY": os.path.join(FUNDAMENTALS_DATA_PATH, "etf_data", "sector_exposure"),
+# --- Python Dictionary for File Paths (Used by YAML via data_type_key) ---
+PATH_CONFIG = {
+    "profile": os.path.join(FUNDAMENTALS_DATA_PATH, "profile"),
+    "ratios": os.path.join(FUNDAMENTALS_DATA_PATH, "ratios"),
+    "income": os.path.join(FUNDAMENTALS_DATA_PATH, "income_statements"),
+    "balance": os.path.join(FUNDAMENTALS_DATA_PATH, "balance_sheets"),
+    "cashflow": os.path.join(FUNDAMENTALS_DATA_PATH, "cash_flows"),
+    "key_metrics": os.path.join(FUNDAMENTALS_DATA_PATH, "key_metrics"),
+    "dividends": os.path.join(FUNDAMENTALS_DATA_PATH, "dividends"),
+    "analyst_estimates": os.path.join(FUNDAMENTALS_DATA_PATH, "analyst_estimates"),
+
+    "etf_info": os.path.join(FUNDAMENTALS_DATA_PATH, ETF_DATA_SUBPATH_NAME, "info"),
+    "etf_holdings": os.path.join(FUNDAMENTALS_DATA_PATH, ETF_DATA_SUBPATH_NAME, "holdings"),
+    "etf_country_exposure": os.path.join(FUNDAMENTALS_DATA_PATH, ETF_DATA_SUBPATH_NAME, "country_exposure"),
+    "etf_sector_exposure": os.path.join(FUNDAMENTALS_DATA_PATH, ETF_DATA_SUBPATH_NAME, "sector_exposure"),
 }
 
-# --- Global Fetching Parameters ---
-OVERALL_HISTORICAL_START_DATE = "2010-01-01"
-# For fundamentals, we might want to define how often to update them
-FUNDAMENTALS_UPDATE_FREQUENCY_DAYS = 30 # Update fundamentals approx. every 30 days
-API_GENERAL_DELAY = 1.5 # Seconds between most API calls for different data types per ticker
-API_PROVIDER_DELAY = 3 # Seconds between calls to the same provider (like FMP or YF via OBB) for different tickers
+# --- Python Dictionary for OBB Function Mapping (Used by YAML via obb_function_key) ---
+OBB_FUNCTION_PYTHON_MAP = {
+    # OBB wrappers from openbb_data_extract.py
+    "profile": obb_get_company_profile,
+    #"ratios": obb_get_financial_ratios,
+    "income": obb_get_income_statement,
+    "balance": obb_get_balance_sheet,
+    "cashflow": obb_get_cash_flow,
+    "key_metrics": obb_get_key_metrics,
+    "dividends": obb_get_dividends,
+    "analyst_estimates": obb_get_analyst_estimates,
+    "etf_info": obb_get_etf_info,
+    "etf_holdings": obb_get_etf_holdings,
+    "etf_country_exposure": obb_get_etf_country_exposure,
+    "etf_sector_exposure": obb_get_etf_sector_exposure,
+}
 
+# General Fetching Parameters
+OVERALL_HISTORICAL_START_DATE = "2010-01-01"
+NEWS_FETCH_LIMIT_PER_REQUEST = 1000 # For Polygon
+NEWS_DAYS_CHUNK = 90              # For Polygon
 # Google Trends Configuration
 GOOGLE_TRENDS_CHUNK_DAYS = 180
-GOOGLE_TRENDS_SLEEP_BETWEEN_CHUNKS_FOR_SAME_KEYWORD = 65
+GOOGLE_TRENDS_SLEEP_BETWEEN_CHUNKS_FOR_SAME_KEYWORD = 65 # Increased
 GOOGLE_TRENDS_SLEEP_BETWEEN_DIFFERENT_KEYWORDS = 5
 
-# Polygon News (from before)
-NEWS_FETCH_LIMIT_PER_REQUEST = 1000
-NEWS_DAYS_CHUNK = 90
 
-# --- Helper Functions ---
-
-# --- Load Task Configuration from YAML ---
-def load_task_config(yaml_file_path):
+# --- Function to Load Task Configuration from YAML ---
+def load_task_config_from_yaml(yaml_file_path: str) -> Optional[Dict[str, Any]]:
     if not os.path.exists(yaml_file_path):
         print(f"ERROR: Task configuration file not found at {yaml_file_path}")
-        return None, None, None
-    with open(yaml_file_path, 'r') as f:
-        config = yaml.safe_load(f)
+        return None # Return None for the whole config if file not found
+    try:
+        with open(yaml_file_path, 'r') as f:
+            config_all = yaml.safe_load(f)
+        
+        raw_tasks_from_yaml = config_all.get("tasks", {})
+        if not raw_tasks_from_yaml:
+            print("Warning: 'tasks' section not found or empty in YAML config file.")
+            return {} # Return empty dict for tasks if section is missing/empty
+
+        validated_tasks_for_single_type_fetcher = {} # Only tasks for the generic fetcher
+        other_task_configs = {} # For price, sentiment, trends metadata
+
+        for task_name, task_cfg in raw_tasks_from_yaml.items():
+            if not isinstance(task_cfg, dict):
+                print(f"Warning: Task '{task_name}' in YAML is not a dictionary. Skipping task.")
+                continue
+
+            # Store all task configs for potential use by direct fetchers for their metadata
+            other_task_configs[task_name] = task_cfg 
+
+            # Validate tasks intended for fetch_and_update_single_type
+            obb_func_key = task_cfg.get("obb_function_key")
+            data_type_key_from_yaml = task_cfg.get("data_type_key")
+
+            if obb_func_key and data_type_key_from_yaml: # If these keys are present, it's for the generic fetcher
+                is_valid_for_single_type = True
+                if obb_func_key not in OBB_FUNCTION_PYTHON_MAP:
+                    print(f"Warning: Task '{task_name}' (for single_type fetcher) has invalid 'obb_function_key': '{obb_func_key}'. Task will be skipped by single_type fetcher.")
+                    is_valid_for_single_type = False
+                
+                if data_type_key_from_yaml not in PATH_CONFIG:
+                    print(f"Warning: Task '{task_name}' (for single_type fetcher) has invalid 'data_type_key': '{data_type_key_from_yaml}'. Task will be skipped by single_type fetcher.")
+                    is_valid_for_single_type = False
+                
+                if "asset_types" not in task_cfg or not isinstance(task_cfg.get("asset_types"), list):
+                    print(f"Warning: Task '{task_name}' (for single_type fetcher) is missing 'asset_types' list. Task will be skipped by single_type fetcher.")
+                    is_valid_for_single_type = False
+
+                if is_valid_for_single_type:
+                    validated_tasks_for_single_type_fetcher[task_name] = task_cfg
+                else:
+                    print(f"--- Task '{task_name}' not suitable for generic fetch_and_update_single_type due to config errors. ---")
+
+            if not validated_tasks_for_single_type_fetcher:
+                print("Warning: No valid tasks found in YAML for the generic fetch_and_update_single_type after validation.")
     
-    # Resolve OBB function map
-    obb_func_map_from_yaml = config.get("obb_function_map", {})
-    resolved_obb_function_map = {}
-    for key, func_name_str in obb_func_map_from_yaml.items():
-        # Use globals() to get the actual function object from its string name
-        # Ensure the functions are imported in this script's global scope
-        if func_name_str in globals():
-            resolved_obb_function_map[key] = globals()[func_name_str]
-        else:
-            print(f"Warning: Function '{func_name_str}' defined in YAML for key '{key}' not found in script globals.")
-            resolved_obb_function_map[key] = None # Or raise error
-
-    # Resolve Data Type Paths
-    data_type_paths_keys_from_yaml = config.get("data_type_paths_keys", {})
-    resolved_data_type_paths = {}
-    for key, path_key_str in data_type_paths_keys_from_yaml.items():
-        if path_key_str in PYTHON_PATH_MAP:
-            resolved_data_type_paths[key] = PYTHON_PATH_MAP[path_key_str]
-        else:
-            print(f"Warning: Path key '{path_key_str}' for data type '{key}' not found in PYTHON_PATH_MAP.")
-            resolved_data_type_paths[key] = None # Or raise error
-
-    task_details = config.get("tasks", {})
-    return resolved_obb_function_map, resolved_data_type_paths, task_details
+        return validated_tasks_for_single_type_fetcher, other_task_configs
+        
+    except Exception as e:
+        print(f"Error loading or parsing YAML configuration from {yaml_file_path}: {e}")
+        return None # Return None if general parsing error
 
 def ensure_dir(directory_path):
     """Ensures that a directory exists, creating it if necessary."""
@@ -405,119 +435,144 @@ def fetch_and_update_sentiment_data(
 
 # --- NEW: Fundamental Data Fetching (Generic for statements, ratios, etc.) ---
 # Modified fetch_and_update_single_type to use resolved maps
+# Make sure fetch_and_update_single_type uses the resolved maps passed to it:
 def fetch_and_update_single_type(
     ticker: str,
-    asset_type: str,
-    task_name: str,
-    task_config_item: dict,
-    overall_start_date_str: str,
-    resolved_obb_function_map: Dict[str, Callable],
-    resolved_data_type_paths: Dict[str, str],
-    global_force_update_flag: bool = False
+    asset_type: str, # e.g., "STOCK" or "ETF"
+    task_name: str,  # The key from the YAML tasks dictionary, e.g., "stock_profile"
+    task_config_item: dict, # The configuration dictionary for this specific task from YAML
+    overall_start_date_str: str, # Global historical start date for filtering
+    # These two maps are the Python global maps, passed in for clarity:
+    resolved_obb_function_map: Dict[str, Callable], # OBB_FUNCTION_PYTHON_MAP
+    resolved_data_type_paths: Dict[str, str],    # PATH_CONFIG
+    global_force_update_flag: bool = False # From command-line args
 ):
-    obb_function_key = task_config_item["obb_function_key"]
-    data_type_key = task_config_item["data_type_key"]
+    """
+    Fetches and updates a single type of data (e.g., profile, ratios, etf_info)
+    for a given ticker using OpenBB wrapper functions.
+    This function is driven by the task_config_item from the YAML file.
+    """
 
-    # --- Initial Checks for Resolved Configs (as before) ---
-    if obb_function_key not in resolved_obb_function_map or not resolved_obb_function_map[obb_function_key]:
-        print(f"Skipping task '{task_name}' for {ticker}: OBB function for key '{obb_function_key}' not resolved.")
+    # --- 1. Resolve function and path from task configuration ---
+    obb_function_key = task_config_item.get("obb_function_key")
+    data_type_key = task_config_item.get("data_type_key")
+
+    # These checks should have been caught by load_task_config_from_yaml if it filters,
+    # but good to have as a safeguard if it only warns.
+    if not obb_function_key or obb_function_key not in resolved_obb_function_map:
+        print(f"ERROR (single_type): Task '{task_name}' for '{ticker}' - 'obb_function_key' ('{obb_function_key}') is missing or invalid. Skipping.")
         return
-    if data_type_key not in resolved_data_type_paths or not resolved_data_type_paths[data_type_key]:
-        print(f"Skipping task '{task_name}' for {ticker}: Data path for key '{data_type_key}' not resolved.")
+    if not data_type_key or data_type_key not in resolved_data_type_paths:
+        print(f"ERROR (single_type): Task '{task_name}' for '{ticker}' - 'data_type_key' ('{data_type_key}') is missing or invalid. Skipping.")
         return
 
-    obb_function = resolved_obb_function_map[obb_function_key]
-    data_path = resolved_data_type_paths[data_type_key]
-    
-    display_name_for_file = f"{ticker}{task_config_item['display_name_suffix']}"
-    update_frequency_days = task_config_item["update_frequency_days"]
-    obb_kwargs_from_config = task_config_item["obb_kwargs"].copy()
-    default_provider = task_config_item.get("default_provider") # Use .get for safety
+    function_to_call = resolved_obb_function_map[obb_function_key]
+    base_save_path = resolved_data_type_paths[data_type_key]
+
+    # --- 2. Prepare parameters from task_config_item ---
+    display_name_suffix = task_config_item.get('display_name_suffix', '')
+    filename_base = f"{ticker}{display_name_suffix}" # e.g., AAPL_profile or AAPL_ratios_annual
+    file_path = os.path.join(base_save_path, f"{filename_base.replace(' ', '_').lower()}.parquet")
+
+    update_frequency_days = task_config_item.get("update_frequency_days", 90) # Default to 90 if not in YAML
+    obb_kwargs_from_yaml = task_config_item.get("obb_kwargs", {}).copy() # .copy() is important
+    default_provider_from_yaml = task_config_item.get("default_provider")
     fetch_mode_from_yaml = task_config_item.get("fetch_mode", "normal")
 
-    provider_to_use = default_provider
-    if default_provider == "fmp" and not is_us_ticker(ticker):
-        print(f"INFO: Task '{display_name_for_file}' for non-US ticker {ticker} was for FMP. Trying yfinance.")
+    # --- 3. Determine effective provider ---
+    provider_to_use = default_provider_from_yaml
+    if default_provider_from_yaml == "fmp" and not is_us_ticker(ticker):
+        print(f"INFO (single_type): Task '{task_name}' for non-US ticker '{ticker}' was for FMP. Attempting yfinance.")
         provider_to_use = "yfinance"
+    
+    provider_for_print_log = provider_to_use if provider_to_use else "OBB_Default" # For logging
 
-    final_obb_kwargs = obb_kwargs_from_config.copy()
-    final_obb_kwargs["symbol"] = ticker
-    if provider_to_use:
-         final_obb_kwargs["provider"] = provider_to_use
-    if 'ticker' in final_obb_kwargs and final_obb_kwargs.get('ticker') == ticker:
-        final_obb_kwargs.pop('ticker')
+    # --- 4. Construct final keyword arguments for the OpenBB wrapper function ---
+    final_obb_kwargs_to_pass = obb_kwargs_from_yaml.copy()
+    final_obb_kwargs_to_pass["symbol"] = ticker # Standardize to 'symbol' for all obb_get_... wrappers
+    if provider_to_use: # Only add 'provider' if it's not None/empty
+        final_obb_kwargs_to_pass["provider"] = provider_to_use
+    # Remove 'ticker' key if it was present in YAML's obb_kwargs to avoid conflict with 'symbol'
+    if 'ticker' in final_obb_kwargs_to_pass:
+        final_obb_kwargs_to_pass.pop('ticker')
 
-    period_for_print = final_obb_kwargs.get("period", "N/A")
-    provider_for_print = provider_to_use if provider_to_use else "OBB_Default"
+    period_for_print_log = final_obb_kwargs_to_pass.get("period", "N/A")
 
-    # --- MOVED FILE PATH DEFINITION EARLIER ---
-    print(f"\n--- Processing {display_name_for_file} for {ticker} (Task: {task_name}, Type: {asset_type}, Provider: {provider_for_print}, Period: {period_for_print}, Mode from YAML: {fetch_mode_from_yaml}) ---")
-    ensure_dir(data_path) # Ensure the specific data type path (e.g., RATIOS_DATA_PATH) exists
-    safe_display_name = display_name_for_file.replace(' ', '_').lower() # Used for filename
-    file_name = f"{safe_display_name}.parquet"
-    file_path = os.path.join(data_path, file_name)
-    # --- END MOVED SECTION ---
+    print(f"\n--- Processing {filename_base} for {ticker} (Task: {task_name}, Type: {asset_type}, Provider: {provider_for_print_log}, Period: {period_for_print_log}, YAML Mode: {fetch_mode_from_yaml}) ---")
+    ensure_dir(base_save_path) # Ensure the specific data type path exists
 
-    # --- DEBUG PRINTS (as before) ---
+    # --- 5. Staleness and emptiness check logic to determine if fetching is needed ---
+    should_fetch = False
+    file_is_empty = is_parquet_file_empty(file_path)
+    last_mod_days = get_file_last_modified_days_ago(file_path) # Get this once
+
+    print(f"  DEBUG (single_type for {task_name}, {ticker}): File: '{file_path}'")
     print(f"  DEBUG (single_type for {task_name}, {ticker}): global_force_update_flag = {global_force_update_flag}")
     print(f"  DEBUG (single_type for {task_name}, {ticker}): fetch_mode_from_yaml = '{fetch_mode_from_yaml}'")
-    print(f"  DEBUG (single_type for {task_name}, {ticker}): File path = '{file_path}'")
+    print(f"  DEBUG (single_type for {task_name}, {ticker}): file_is_empty = {file_is_empty}")
+    print(f"  DEBUG (single_type for {task_name}, {ticker}): last_mod_days = {last_mod_days:.1f}, update_frequency = {update_frequency_days} days")
 
-
-    # Staleness and emptiness check logic
-    should_fetch = False
-    file_is_empty = is_parquet_file_empty(file_path) # Now file_path is defined
 
     if global_force_update_flag:
-        print(f"  DEBUG (single_type for {task_name}, {ticker}): Condition met: global_force_update_flag is True. Setting should_fetch = True.")
-        print(f"GLOBAL FORCE UPDATE for task '{task_name}': Re-fetching '{display_name_for_file}' for {ticker}.")
+        print(f"  INFO (single_type): GLOBAL FORCE UPDATE for '{task_name}', '{ticker}'. Will fetch.")
         should_fetch = True
     elif fetch_mode_from_yaml == "force_fetch":
-        print(f"  DEBUG (single_type for {task_name}, {ticker}): Condition met: fetch_mode_from_yaml is 'force_fetch'. Setting should_fetch = True.")
-        print(f"TASK-LEVEL FORCE FETCH for task '{task_name}': Re-fetching '{display_name_for_file}' for {ticker}.")
+        print(f"  INFO (single_type): TASK-LEVEL FORCE FETCH for '{task_name}', '{ticker}'. Will fetch.")
         should_fetch = True
-    elif file_is_empty:
-        print(f"  DEBUG (single_type for {task_name}, {ticker}): Condition met: file_is_empty is True. Setting should_fetch = True.")
-        print(f"Data '{display_name_for_file}' for {ticker} file is EMPTY. Will fetch.")
+    elif file_is_empty: # Always fetch if the target file is empty, regardless of age (unless forced off)
+        print(f"  INFO (single_type): File for '{task_name}', '{ticker}' is EMPTY. Will fetch.")
         should_fetch = True
-    else: # File is not empty, and not forced. Now check staleness.
-        last_mod_days = get_file_last_modified_days_ago(file_path)
-        print(f"  DEBUG (single_type for {task_name}, {ticker}): last_mod_days = {last_mod_days}, file_is_empty = {file_is_empty}, update_frequency_days = {update_frequency_days}")
-        if last_mod_days >= update_frequency_days:
-            print(f"  DEBUG (single_type for {task_name}, {ticker}): Condition met: Data is STALE. Setting should_fetch = True.")
-            print(f"Data '{display_name_for_file}' for {ticker} is STALE. Will fetch.")
-            should_fetch = True
-        else: # Normal mode, recent, and not empty
-            print(f"  DEBUG (single_type for {task_name}, {ticker}): No fetch conditions met (recent, not empty, not forced). should_fetch = False.")
-            print(f"Data '{display_name_for_file}' for {ticker} is recent and not empty (Mode: {fetch_mode_from_yaml}). Skipping.")
+    elif last_mod_days >= update_frequency_days: # Not empty, not forced, so check staleness
+        print(f"  INFO (single_type): File for '{task_name}', '{ticker}' is STALE (last_mod: {last_mod_days:.1f} days >= freq: {update_frequency_days} days). Will fetch.")
+        should_fetch = True
+    # 'update_if_empty' is covered by the `file_is_empty` check above, which now takes precedence over recency if not forced.
+    # If file is not empty, 'update_if_empty' behaves like 'normal' (i.e., depends on staleness).
+    else: # Not forced, not empty, and not stale
+        print(f"  INFO (single_type): Data for '{task_name}', '{ticker}' is recent (last_mod: {last_mod_days:.1f} days < freq: {update_frequency_days} days) and not empty. Skipping.")
     
     if not should_fetch:
-        print(f"  DEBUG (single_type for {task_name}, {ticker}): Final decision: Not fetching for {display_name_for_file}. Returning.")
-        return
-    else:
-        print(f"  DEBUG (single_type for {task_name}, {ticker}): Final decision: Proceeding with fetch for {display_name_for_file}.")
+        return # Exit if no fetching is needed
 
-    print(f"Fetching {display_name_for_file} for {ticker} with args: {final_obb_kwargs}...")
+    # --- 6. Fetch data using the resolved OpenBB wrapper function ---
+    print(f"Fetching {filename_base} for {ticker} using {function_to_call.__name__} with args: "
+          f"{ {k:v for k,v in final_obb_kwargs_to_pass.items() if k != 'api_key'} }") # Avoid printing keys
+
     try:
-        df = obb_function(**final_obb_kwargs)
+        df = function_to_call(**final_obb_kwargs_to_pass) # Calls obb_get_ratios, obb_get_profile etc.
+
+        if df is None: # Some OBB functions might return None on error before raising exception
+            print(f"WARNING (single_type): {function_to_call.__name__} returned None for {filename_base}, {ticker}.")
+            df = pd.DataFrame() # Treat as empty
+
         if not df.empty:
+            # Filter by overall_start_date if index is datetime (for historical series like ratios over time)
+            # For single-point data like profile, this might not apply or index might not be datetime.
             if isinstance(df.index, pd.DatetimeIndex) and not df.index.empty:
                 try:
+                    df_original_len = len(df)
                     df = df[df.index >= pd.to_datetime(overall_start_date_str)]
-                except TypeError:
-                    print(f"Warning: Could not filter by date for {display_name_for_file} {ticker}. Index might not be datetime compatible.")
+                    if len(df) < df_original_len:
+                        print(f"  INFO (single_type): Filtered {filename_base} for {ticker} by start date, removed {df_original_len - len(df)} old records.")
+                except TypeError: # If index contains non-datetime elements after OBB call
+                    print(f"  WARNING (single_type): Could not filter by date for {filename_base} {ticker}. Index type: {type(df.index)}. Values: {df.index[:5]}")
             
             if not df.empty:
                 save_df_to_parquet(df, file_path)
-                print(f"Saved data for {display_name_for_file} ({ticker}). Shape: {df.shape}")
+                print(f"  SUCCESS (single_type): Saved data for {filename_base} ({ticker}). Shape: {df.shape} to {file_path}")
             else:
-                print(f"No data for {display_name_for_file} ({ticker}) after date filtering or fetch returned empty. Saving empty DataFrame to mark as checked.")
+                print(f"  INFO (single_type): No data for {filename_base} ({ticker}) after date filtering. Saving empty DataFrame.")
                 save_df_to_parquet(pd.DataFrame(), file_path)
         else:
-            print(f"No data returned for {display_name_for_file} ({ticker}) from {obb_function.__name__}. Saving empty DataFrame to mark as checked.")
+            print(f"  INFO (single_type): No data returned for {filename_base} ({ticker}) from {function_to_call.__name__}. Saving empty DataFrame.")
             save_df_to_parquet(pd.DataFrame(), file_path)
+
     except Exception as e:
-        print(f"Error processing {display_name_for_file} for {ticker} with args {final_obb_kwargs}: {e}")
+        print(f"ERROR (single_type): Exception during {function_to_call.__name__} for {filename_base}, ticker {ticker} with args {final_obb_kwargs_to_pass}: {e}")
+        # Optionally, save an empty DataFrame here too, or leave the old file if it exists and wasn't forced
+        if global_force_update_flag or fetch_mode_from_yaml == "force_fetch" or file_is_empty:
+             print(f"  Attempting to save empty DataFrame for {filename_base} due to error and force/empty condition.")
+             save_df_to_parquet(pd.DataFrame(), file_path)
+
 
 # --- Google Trends (remains largely the same, but uses constants) ---
 def fetch_and_update_google_trends(ticker_or_keyword, overall_start_date_str, end_date_str,
@@ -609,151 +664,160 @@ def get_keyword_for_ticker(ticker_symbol: str) -> str:
     return ticker_symbol # Fallback for ETFs or complex symbols
 
 
+# --- Main Execution Block ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Data Ingestion Script for Stocks and ETFs.")
-    parser.add_argument("--force-update-all", action="store_true", help="Force update ALL data types.")
-    parser.add_argument("--tickers", type=str, nargs='+', help="Optional: Process only specific tickers.")
+    parser.add_argument(
+        "--force-update-all",
+        action="store_true",
+        help="Force update ALL data types, ignoring existing files and update frequencies."
+    )
+    parser.add_argument(
+        "--tickers", type=str, nargs='+',
+        help="Optional: Process only specific tickers (e.g., AAPL MSFT XGLE.DE)."
+    )
     args = parser.parse_args()
-
+    
     print("--- Script Start ---")
+    if args.force_update_all:
+        print("!!! GLOBAL FORCE UPDATE ALL ENABLED !!!")
+    if args.tickers:
+        print(f"--- TARGETED TICKER MODE: {args.tickers} ---")
     script_start_time = time.time()
 
+    # --- Load Task Configuration from YAML ---
     print(f"\nDEBUG: Attempting to load tasks from: {TASKS_CONFIG_FILE}")
-    OBB_FUNCTION_MAP_RESOLVED, DATA_TYPE_PATHS_RESOLVED, TASK_CONFIG_LOADED = load_task_config(TASKS_CONFIG_FILE)
+    # load_task_config_from_yaml returns the dictionary of validated tasks suitable for generic fetcher,
+    # and a second dictionary containing ALL task configurations from YAML for metadata.
+    VALIDATED_OBB_WRAPPER_TASKS, ALL_TASK_CONFIGS_METADATA = load_task_config_from_yaml(TASKS_CONFIG_FILE)
 
-    print(f"DEBUG_LOAD_CONFIG: OBB_FUNCTION_MAP_RESOLVED is None: {OBB_FUNCTION_MAP_RESOLVED is None}")
-    if OBB_FUNCTION_MAP_RESOLVED: print(f"DEBUG_LOAD_CONFIG: OBB_FUNCTION_MAP_RESOLVED keys: {list(OBB_FUNCTION_MAP_RESOLVED.keys())}")
-    
-    print(f"DEBUG_LOAD_CONFIG: DATA_TYPE_PATHS_RESOLVED is None: {DATA_TYPE_PATHS_RESOLVED is None}")
-    if DATA_TYPE_PATHS_RESOLVED: print(f"DEBUG_LOAD_CONFIG: DATA_TYPE_PATHS_RESOLVED keys: {list(DATA_TYPE_PATHS_RESOLVED.keys())}")
-    
-    print(f"DEBUG_LOAD_CONFIG: TASK_CONFIG_LOADED is None: {TASK_CONFIG_LOADED is None}")
-    if isinstance(TASK_CONFIG_LOADED, dict):
-        # TASK_CONFIG_LOADED directly contains the tasks
-        print(f"DEBUG_LOAD_CONFIG: TASK_CONFIG_LOADED has {len(TASK_CONFIG_LOADED)} task items. Keys: {list(TASK_CONFIG_LOADED.keys())}")
-        if TASK_CONFIG_LOADED: # Check if it's not empty
-             first_task_key = list(TASK_CONFIG_LOADED.keys())[0]
-             print(f"DEBUG_LOAD_CONFIG: First task ('{first_task_key}') content: {TASK_CONFIG_LOADED[first_task_key]}")
-    else:
-        print(f"DEBUG_LOAD_CONFIG: TASK_CONFIG_LOADED is not a dictionary, type is {type(TASK_CONFIG_LOADED)}")
-
-    # Corrected critical error check:
-    # We need TASK_CONFIG_LOADED to be a non-empty dictionary.
-    if not isinstance(TASK_CONFIG_LOADED, dict) or not TASK_CONFIG_LOADED or \
-       not OBB_FUNCTION_MAP_RESOLVED or not DATA_TYPE_PATHS_RESOLVED:
-        print("CRITICAL ERROR: Essential configurations (TASK_CONFIG items, OBB_FUNCTION_MAP, DATA_TYPE_PATHS) not loaded correctly from YAML or task list is empty. Exiting.")
+    if ALL_TASK_CONFIGS_METADATA is None:
+        print("CRITICAL ERROR: Could not load or parse task configurations from YAML. Exiting.")
         sys.exit(1)
+    if VALIDATED_OBB_WRAPPER_TASKS is None: # Should not happen if ALL_TASK_CONFIGS_METADATA is not None, but check
+        print("CRITICAL ERROR: Validated OBB wrapper tasks are None. Exiting.")
+        sys.exit(1)
+    
+    print(f"DEBUG: Loaded {len(ALL_TASK_CONFIGS_METADATA)} total task definitions from YAML.")
+    print(f"DEBUG: {len(VALIDATED_OBB_WRAPPER_TASKS)} tasks validated for generic OBB wrapper processing.")
 
-    # Ensure Base Directories Exist
+
+    # --- Ensure Base Directories from Python Constants Exist ---
     ensure_dir(DATA_BASE_PATH)
     ensure_dir(PRICE_DATA_PATH)
     ensure_dir(SENTIMENT_DATA_PATH)
     ensure_dir(TRENDS_DATA_PATH)
     ensure_dir(FUNDAMENTALS_DATA_PATH)
-    # Ensure all unique paths from the resolved config are created
-    for path in set(DATA_TYPE_PATHS_RESOLVED.values()):
-        if path: ensure_dir(path)
+    # Ensure all unique paths derived from PATH_CONFIG (used by validated YAML tasks) are created
+    for path_str in set(PATH_CONFIG.values()):
+        if path_str: ensure_dir(path_str)
 
-    effective_end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-    print(f"Data will be fetched up to: {effective_end_date}")
 
-    # --- 3. Load Ticker Universe ---
-    print(f"\nDEBUG: Attempting to load tickers from: {TICKER_UNIVERSE_FILE}")
+    # --- Load Ticker Universe ---
     tickers_from_file = load_ticker_universe(TICKER_UNIVERSE_FILE)
-    print(f"DEBUG_LOAD_TICKERS: tickers_from_file (first 5): {tickers_from_file[:5]}")
     if not tickers_from_file:
-        print("CRITICAL ERROR: No tickers loaded from universe file. Exiting.")
+        print("No tickers to process from ticker_universe.txt. Exiting.")
         sys.exit(1)
 
-    # --- 4. Determine which tickers to process ---
+    # --- Determine which tickers to process ---
     tickers_to_process_info = []
     if args.tickers:
-        print(f"DEBUG_TICKER_ARG: --tickers argument provided: {args.tickers}")
+        print(f"INFO: Processing only specified tickers: {args.tickers}")
         full_universe_dict = {ticker.upper(): asset_type for ticker, asset_type in tickers_from_file}
         for t_arg in args.tickers:
             t_upper = t_arg.upper()
             if t_upper in full_universe_dict:
                 tickers_to_process_info.append((t_upper, full_universe_dict[t_upper]))
             else:
-                print(f"Warning: Ticker '{t_arg}' from --tickers arg not found in universe. Assuming STOCK.")
+                print(f"Warning: Ticker '{t_arg}' from --tickers arg not found in universe file. Assuming STOCK for processing.")
                 tickers_to_process_info.append((t_upper, "STOCK"))
         if not tickers_to_process_info:
-            print("CRITICAL ERROR: No valid tickers after processing --tickers argument. Exiting.")
+            print("CRITICAL: No valid tickers after processing --tickers argument. Exiting.")
             sys.exit(1)
     else:
-        print("DEBUG_TICKER_ARG: No --tickers argument, using all from universe file.")
         tickers_to_process_info = tickers_from_file
-    
-    print(f"DEBUG_TICKERS_FINAL: Final list of tickers to process (first 5): {tickers_to_process_info[:5]}")
-    if not tickers_to_process_info:
-            print("CRITICAL ERROR: Final list of tickers to process is empty. Exiting.")
-            sys.exit(1)
+    print(f"Tickers to process ({len(tickers_to_process_info)} total): { [t[0] for t in tickers_to_process_info][:10] } (showing first 10 if many)")
 
-    effective_end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-    print(f"\nDEBUG: Effective end date for fetching: {effective_end_date}")
 
-    # --- 5. Main Loop Over Tickers ---
-    print(f"\nDEBUG: Entering main asset processing loop for {len(tickers_to_process_info)} assets...")
+    effective_end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d') # Russian typo fixed
+    print(f"Data will be fetched up to: {effective_end_date}")
+
+    # --- Main Loop Over Tickers ---
     for ticker_symbol, asset_type_str in tickers_to_process_info:
-            print(f"\n{'='*15} Processing Asset: {ticker_symbol} (Type: {asset_type_str}) {'='*15}")
-            asset_start_time = time.time()
+        print(f"\n{'='*15} Processing Asset: {ticker_symbol} (Type: {asset_type_str}) {'='*15}")
+        asset_start_time = time.time()
 
-            # 1. Price Data (Dedicated call)
-            print("\n--- Price Data ---")
-            fetch_and_update_price_data(
-                ticker_symbol, OVERALL_HISTORICAL_START_DATE, effective_end_date,
-                force_update_flag=args.force_update_all
-            )
-            time.sleep(0.2)
+        # --- 1. Price Data (Dedicated Call) ---
+        # Price data config can be fetched from ALL_TASK_CONFIGS_METADATA if defined in YAML
+        price_task_config = ALL_TASK_CONFIGS_METADATA.get("price_data", {})
+        force_this_price = args.force_update_all or price_task_config.get("fetch_mode") == "force_fetch"
+        # The fetch_and_update_price_data function has its own staleness/empty checks now
+        fetch_and_update_price_data(
+            ticker_symbol, OVERALL_HISTORICAL_START_DATE, effective_end_date,
+            force_update_flag=force_this_price
+        )
+        time.sleep(0.3)
 
-            # 2. Sentiment Data (Dedicated call)
-            # print("\n--- Sentiment Data ---")
-            # fetch_and_update_sentiment_data(
-            #     ticker_symbol, OVERALL_HISTORICAL_START_DATE, effective_end_date,
-            #     POLYGON_API_KEY, force_update_flag=args.force_update_all
-            # )
-            # time.sleep(1.5)
-            
-            # 3. Asset-Type Specific Data (Fundamentals/ETF details via YAML config)
-            print(f"\n--- {asset_type_str} Specific Data (from YAML config) ---")
-            processed_any_task_for_this_asset = False
-            for task_name_from_yaml, task_item_config in TASK_CONFIG_LOADED.items(): # TASK_CONFIG_LOADED is the dict of tasks
-                # Skip 'price_data' and 'sentiment_data' if they are in YAML for other metadata
-                # but handled by dedicated functions above.
-                if task_name_from_yaml in ["price_data", "sentiment_data"]: # Example: these are special
-                    continue
+        # --- 2. Sentiment Data (Dedicated Call - uncomment to run) ---
+        sentiment_task_config = ALL_TASK_CONFIGS_METADATA.get("sentiment_data", {})
+        force_this_sentiment = args.force_update_all or sentiment_task_config.get("fetch_mode") == "force_fetch"
+        # print("\n--- Sentiment Data ---")
+        # fetch_and_update_sentiment_data(
+        #     ticker_symbol, OVERALL_HISTORICAL_START_DATE, effective_end_date,
+        #     POLYGON_API_KEY, force_update_flag=force_this_sentiment
+        # )
+        # time.sleep(1.5)
 
-                if asset_type_str in task_item_config.get("asset_types", []):
-                    processed_any_task_for_this_asset = True
-                    print(f"    DEBUG_INNER_LOOP: MATCH! Running YAML task '{task_name_from_yaml}' for {ticker_symbol} (Type: {asset_type_str}).")
-                    # ... (call fetch_and_update_single_type as before)
+        # --- 3. OBB Wrapped Data (Fundamentals/ETF details - uses VALIDATED_OBB_WRAPPER_TASKS) ---
+        print(f"\n--- {asset_type_str} Specific Data (OBB Wrappers from YAML config) ---")
+        processed_any_obb_task = False
+        if VALIDATED_OBB_WRAPPER_TASKS:
+            for task_name_from_yaml, task_item_config_from_yaml in VALIDATED_OBB_WRAPPER_TASKS.items():
+                if asset_type_str in task_item_config_from_yaml.get("asset_types", []):
+                    processed_any_obb_task = True
                     fetch_and_update_single_type(
-                        ticker=ticker_symbol,
-                        asset_type=asset_type_str,
-                        task_name=task_name_from_yaml,
-                        task_config_item=task_item_config,
+                        ticker=ticker_symbol, asset_type=asset_type_str,
+                        task_name=task_name_from_yaml, task_config_item=task_item_config_from_yaml,
                         overall_start_date_str=OVERALL_HISTORICAL_START_DATE,
-                        resolved_obb_function_map=OBB_FUNCTION_MAP_RESOLVED,
-                        resolved_data_type_paths=DATA_TYPE_PATHS_RESOLVED,
-                        global_force_update_flag=args.force_update_all
+                        resolved_obb_function_map=OBB_FUNCTION_PYTHON_MAP, # Global map
+                        resolved_data_type_paths=PATH_CONFIG,             # Global map
+                        global_force_update_flag=args.force_update_all    # Global CLI flag
                     )
-                    # ... (sleep logic)
-                else:
-                    print(f"  DEBUG_INNER_LOOP: NO MATCH. Asset type '{asset_type_str}' NOT in task's asset_types {task_item_config.get('asset_types', [])}.")
-            
-            if not processed_any_task_for_this_asset:
-                print(f"DEBUG_MAIN_LOOP: No tasks from YAML were applicable to asset type '{asset_type_str}' for {ticker_symbol}.")
+                    
+                    provider_used_for_sleep = task_item_config_from_yaml.get("default_provider")
+                    if task_item_config_from_yaml.get("default_provider") == "fmp" and not is_us_ticker(ticker_symbol):
+                        provider_used_for_sleep = "yfinance" # Assumed fallback for sleep duration
+                    
+                    sleep_duration = 0.5 # Default for yfinance or unknown
+                    if provider_used_for_sleep == "fmp": sleep_duration = 3.0
+                    elif provider_used_for_sleep == "polygon": sleep_duration = 1.5
+                    time.sleep(sleep_duration)
+        
+        if not processed_any_obb_task and VALIDATED_OBB_WRAPPER_TASKS : # Only print if there were tasks to begin with
+            print(f"INFO: No OBB wrapper tasks from YAML were applicable to asset type '{asset_type_str}' for {ticker_symbol}.")
 
-        # Google Trends (Uncomment if testing)
-        # print(f"\nDEBUG_MAIN_LOOP: Calling fetch_and_update_google_trends for {ticker_symbol}")
+
+        # --- 4. Google Trends Data (Dedicated Call - uncomment to run) ---
+        google_trends_task_config = ALL_TASK_CONFIGS_METADATA.get("google_trends_data", {})
+        force_this_trends = args.force_update_all or google_trends_task_config.get("fetch_mode") == "force_fetch"
+        # print("\n--- Google Trends Data ---")
         # keyword_for_trends = get_keyword_for_ticker(ticker_symbol)
         # if keyword_for_trends:
-        #    fetch_and_update_google_trends(...)
-        # ...
-
-    print(f"--- Finished processing for asset {ticker_symbol} in {time.time() - asset_start_time:.2f}s ---")
-    # ... (sleep between tickers) ...
+        #     fetch_and_update_google_trends( # Ensure this function is defined and handles force_update_flag
+        #         keyword_for_trends, OVERALL_HISTORICAL_START_DATE, effective_end_date,
+        #         chunk_days=GOOGLE_TRENDS_CHUNK_DAYS,
+        #         sleep_between_chunks=GOOGLE_TRENDS_SLEEP_BETWEEN_CHUNKS_FOR_SAME_KEYWORD,
+        #         force_update_flag=force_this_trends # Pass the flag
+        #     )
+        # else:
+        #     print(f"No keyword defined for Google Trends for ticker {ticker_symbol}. Skipping.")
+        
+        print(f"--- Finished all data for {ticker_symbol} in {time.time() - asset_start_time:.2f}s ---")
+        if (ticker_symbol, asset_type_str) != tickers_to_process_info[-1]:
+             print(f"Sleeping for {GOOGLE_TRENDS_SLEEP_BETWEEN_DIFFERENT_KEYWORDS}s before next asset...")
+             time.sleep(GOOGLE_TRENDS_SLEEP_BETWEEN_DIFFERENT_KEYWORDS)
 
     script_end_time = time.time()
-    print(f"\n--- Script End ---")
-    print(f"Total execution time: {script_end_time - script_start_time:.2f} seconds.")
+    print(f"\n###########################################################")
+    print(f"Data ingestion process completed in {script_end_time - script_start_time:.2f} seconds.")
+    print(f"###########################################################")
