@@ -19,9 +19,11 @@ CASH_FLOW_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "cash_flows")
 KEY_METRICS_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "key_metrics")
 DIVIDENDS_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "dividends")
 
-ETF_BASE_PATH = os.path.join(DATA_BASE_PATH, "etf_data")
+ETF_BASE_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "etf_data")
 ETF_INFO_PATH = os.path.join(ETF_BASE_PATH, "info")
 ETF_HOLDINGS_PATH = os.path.join(ETF_BASE_PATH, "holdings")
+ETF_COUNTRIES_EXPOSURE_PATH = os.path.join(ETF_BASE_PATH, "country_exposure")
+ETF_SECTOR_EXPOSURE_PATH = os.path.join(ETF_BASE_PATH, "sector_exposure")
 
 def inspect_parquet_file(file_path):
     """Loads and prints info about a single Parquet file."""
@@ -38,7 +40,7 @@ def inspect_parquet_file(file_path):
             return
 
         print("\nInfo:")
-        df.info() # Gives dtypes, non-null counts, memory usage
+        df.info()
 
         print("\nHead:")
         print(df.head())
@@ -54,7 +56,8 @@ def inspect_parquet_file(file_path):
             print(f"  Min Date: {df.index.min()}")
             print(f"  Max Date: {df.index.max()}")
             if df.index.has_duplicates:
-                print(f"  WARNING: Index has {df.index.duplicated().sum()} duplicate values!")
+                dup_count = df.index.duplicated().sum()
+                print(f"  WARNING: Index has {dup_count} duplicate values!")
         else:
             print("\nIndex is not a DatetimeIndex. Type:", type(df.index))
 
@@ -77,63 +80,60 @@ def inspect_all_parquet_in_directory(directory_path, file_pattern="*.parquet"):
         print("-" * 50)
 
 
-# ─── Helper: Dynamically build the dictionary of folders to scan ───────────────
 def build_paths_to_check(project_root: str):
     """
-    Walks through project_data/ and returns a dict of {label: folder_path}, including:
-      • top-level folders (price_data, sentiment_data, trends_data)
-      • subfolders under fundamentals_data (labeled "Fundamentals – <subfolder>")
-      • subfolders under etf_data (labeled "ETF – <subfolder>")
+    Walk through project_data/ and return a dict of {label: folder_path}, including:
+      • Top-level folders (price_data, sentiment_data, trends_data, etc.)
+      • Under fundamentals_data:
+          – “Fundamentals – profile”, “Fundamentals – ratios”, etc.
+          – If there’s an etf_data folder, descend into it and label each subfolder “ETF – <subfolder>”.
     """
     data_base = os.path.join(project_root, "project_data")
-    paths = {}
+    paths: dict[str, str] = {}
 
-    # First, list everything directly under project_data
+    # List everything directly under project_data
     for entry in sorted(os.listdir(data_base)):
         full_path = os.path.join(data_base, entry)
         if not os.path.isdir(full_path):
             continue
 
-        # If it's fundamentals_data, inspect one level deeper
         if entry == "fundamentals_data":
             fund_base = full_path
             for fund_sub in sorted(os.listdir(fund_base)):
                 sub_path = os.path.join(fund_base, fund_sub)
-                if os.path.isdir(sub_path):
-                    label = f"Fundamentals – {fund_sub}"
+                if not os.path.isdir(sub_path):
+                    continue
+
+                # If it's the etf_data folder, dive one level deeper
+                if fund_sub == "etf_data":
+                    etf_base = sub_path
+                    for etf_sub in sorted(os.listdir(etf_base)):
+                        etf_path = os.path.join(etf_base, etf_sub)
+                        if os.path.isdir(etf_path):
+                            label = f"ETF – {etf_sub.replace('_', ' ').title()}"
+                            paths[label] = etf_path
+
+                # Otherwise, it’s a “normal” fundamentals subfolder
+                else:
+                    label = f"Fundamentals – {fund_sub.replace('_', ' ').title()}"
                     paths[label] = sub_path
 
-        # If it's etf_data, inspect one level deeper
-        elif entry == "etf_data":
-            etf_base = full_path
-            for etf_sub in sorted(os.listdir(etf_base)):
-                sub_path = os.path.join(etf_base, etf_sub)
-                if os.path.isdir(sub_path):
-                    label = f"ETF – {etf_sub}"
-                    paths[label] = sub_path
-
-        # Otherwise, register it as a top-level folder (e.g. price_data, sentiment_data, trends_data)
         else:
-            # Use a more human-friendly label if you like
+            # Top-level folder under project_data (e.g. price_data, sentiment_data, trends_data)
             nice_label = entry.replace("_", " ").title()
             paths[nice_label] = full_path
 
     return paths
 
 
-# ─── Main function: inspect only files matching a ticker ───────────────────────
 def inspect_ticker_data(ticker: str):
     """
     Inspect all Parquet files containing `ticker` in their filename,
-    across each of the data subdirectories discovered dynamically.
+    across each of the dynamically discovered data subdirectories.
     """
-    # Derive PROJECT_ROOT (adjust if this file isn't in a child of project root)
     PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-    # Build the dict of labels → folder paths
     paths_to_check = build_paths_to_check(PROJECT_ROOT)
 
-    # Loop over each folder and glob for "*{ticker}*.parquet"
     for label, folder in paths_to_check.items():
         if not os.path.isdir(folder):
             print(f"\n-- Skipping (folder not found): {folder}")

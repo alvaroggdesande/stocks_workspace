@@ -81,69 +81,68 @@ def process_openbb_object(obb_object, desired_columns=None):
 # --- Fundamental Data functions (obb_get_financial_ratios, etc. - no changes needed in their internal calls) ---
 # They will use provider="fmp" and the SDK will automatically look for OPENBB_FMP_API_KEY.
 # --- Fundamental Data functions ---
-def obb_get_financial_ratios(ticker: str, period: Optional[str] = "annual", limit: Optional[int] = 20, provider: str = "yfinance"):
-    print(f"Fetching financial ratios for {ticker} (Period: {period}, Limit: {limit}, Provider: {provider})")
+def obb_get_financial_ratios(symbol: str, period: Optional[str] = "annual", limit: Optional[int] = 20, provider: str = "yfinance"):
+    print(f"Fetching financial ratios for {symbol} (Period: {period}, Limit: {limit}, Provider: {provider})")
     try:
-        # `limit` might not be supported by yfinance provider for ratios, obb will ignore if not applicable
-        ratios_obj = obb.equity.fundamental.ratios(symbol=ticker, period=period, limit=limit, provider=provider)
+        ratios_obj = obb.equity.fundamental.ratios(symbol=symbol, period=period, limit=limit, provider=provider)
         df = process_openbb_object(ratios_obj)
         if not df.empty and isinstance(df.index, pd.DatetimeIndex): return df.sort_index()
         return df
-    except Exception as e: print(f"Error fetching financial ratios for {ticker} with {provider}: {e}"); return pd.DataFrame()
+    except Exception as e: print(f"Error fetching financial ratios for {symbol} with {provider}: {e}"); return pd.DataFrame()
 
-def obb_get_income_statement(ticker: str, period: Optional[str] = "annual", limit: Optional[int] = 20, provider: str = "yfinance"):
-    print(f"Fetching income statement for {ticker} (Period: {period}, Limit: {limit}, Provider: {provider})")
+def obb_get_income_statement(symbol: str, period: Optional[str] = "annual", limit: Optional[int] = 20, provider: str = "yfinance"):
+    print(f"Fetching income statement for {symbol} (Period: {period}, Limit: {limit}, Provider: {provider})")
     try:
-        income_obj = obb.equity.fundamental.income(symbol=ticker, period=period, limit=limit, provider=provider, reported=False)
+        income_obj = obb.equity.fundamental.income(symbol=symbol, period=period, limit=limit, provider=provider, reported=False)        
         df = process_openbb_object(income_obj)
         if not df.empty and isinstance(df.index, pd.DatetimeIndex): return df.sort_index()
         return df
-    except Exception as e: print(f"Error fetching income statement for {ticker} with {provider}: {e}"); return pd.DataFrame()
+    except Exception as e: print(f"Error fetching income statement for {symbol} with {provider}: {e}"); return pd.DataFrame()
 
 # Similar for balance_sheet, cash_flow
-def obb_get_balance_sheet(ticker: str, period: Optional[str] = "annual", limit: Optional[int] = 20, provider: str = "yfinance"):
-     print(f"Fetching balance sheet for {ticker} (Period: {period}, Limit: {limit}, Provider: {provider})")
+def obb_get_balance_sheet(symbol: str, period: Optional[str] = "annual", limit: Optional[int] = 20, provider: str = "yfinance"):
+     print(f"Fetching balance sheet for {symbol} (Period: {period}, Limit: {limit}, Provider: {provider})")
      try:
-         balance_obj = obb.equity.fundamental.balance(symbol=ticker, period=period, limit=limit, provider=provider, reported=False)
+         balance_obj = obb.equity.fundamental.balance(symbol=symbol, period=period, limit=limit, provider=provider, reported=False)
          df = process_openbb_object(balance_obj)
          if not df.empty and isinstance(df.index, pd.DatetimeIndex): return df.sort_index()
          return df
-     except Exception as e: print(f"Error fetching balance sheet for {ticker} with {provider}: {e}"); return pd.DataFrame()
+     except Exception as e: print(f"Error fetching balance sheet for {symbol} with {provider}: {e}"); return pd.DataFrame()
 
 
-def obb_get_cash_flow(ticker: str, period: Optional[str] = "annual", limit: Optional[int] = 20, provider: str = "yfinance"):
-     print(f"Fetching cash flow for {ticker} (Period: {period}, Limit: {limit}, Provider: {provider})")
+def obb_get_cash_flow(symbol: str, period: Optional[str] = "annual", limit: Optional[int] = 20, provider: str = "yfinance"):
+     print(f"Fetching cash flow for {symbol} (Period: {period}, Limit: {limit}, Provider: {provider})")
      try:
-         cash_obj = obb.equity.fundamental.cash(symbol=ticker, period=period, limit=limit, provider=provider, reported=False)
+         cash_obj = obb.equity.fundamental.cash(symbol=symbol, period=period, limit=limit, provider=provider, reported=False)
          df = process_openbb_object(cash_obj)
          if not df.empty and isinstance(df.index, pd.DatetimeIndex): return df.sort_index()
          return df
-     except Exception as e: print(f"Error fetching cash flow for {ticker} with {provider}: {e}"); return pd.DataFrame()
+     except Exception as e: print(f"Error fetching cash flow for {symbol} with {provider}: {e}"); return pd.DataFrame()
 
 # Other fundamentals
-def obb_get_company_profile(ticker: str, provider: str = "yfinance"): # Default to yfinance
-    print(f"Fetching company profile for {ticker} (Provider: {provider})")
+def obb_get_company_profile(symbol: str, provider: str = "yfinance"): # Default to yfinance
+    print(f"Fetching company profile for {symbol} (Provider: {provider})")
     try:
-        profile_obj = obb.equity.profile(symbol=ticker, provider=provider)
+        profile_obj = obb.equity.profile(symbol=symbol, provider=provider)
         df = process_openbb_object(profile_obj) # Profile is usually not indexed by date
         return df
-    except Exception as e: print(f"Error fetching profile for {ticker} with {provider}: {e}"); return pd.DataFrame()
+    except Exception as e: print(f"Error fetching profile for {symbol} with {provider}: {e}"); return pd.DataFrame()
 
-def obb_get_analyst_estimates(ticker: str, provider: str = "yfinance"): # yfinance is good for this
-    print(f"Fetching analyst estimates for {ticker} (Provider: {provider})")
+def obb_get_analyst_estimates(symbol: str, provider: str = "yfinance"): # yfinance is good for this
+    print(f"Fetching analyst estimates for {symbol} (Provider: {provider})")
     try:
-        estimates_obj = obb.equity.estimates.consensus(symbol=ticker, provider=provider)
+        estimates_obj = obb.equity.estimates.consensus(symbol=symbol, provider=provider)
         df = process_openbb_object(estimates_obj)
         return df
-    except Exception as e: print(f"Error fetching analyst estimates for {ticker} with {provider}: {e}"); return pd.DataFrame()
+    except Exception as e: print(f"Error fetching analyst estimates for {symbol} with {provider}: {e}"); return pd.DataFrame()
 
-def obb_get_dividends(ticker: str, provider: str = "yfinance"): # yfinance for dividends
-    print(f"Fetching dividends for {ticker} (Provider: {provider})")
+def obb_get_dividends(symbol: str, provider: str = "yfinance"): # yfinance for dividends
+    print(f"Fetching dividends for {symbol} (Provider: {provider})")
     try:
         # For yfinance, historical dividends might be under equity.price.historical and then filter
         # Or obb.equity.calendar.dividends() might be better
         # Let's use obb.equity.calendar.dividends which is more standard for historical dividend list
-        dividends_obj = obb.equity.calendar.dividends(symbol=ticker, provider=provider)
+        dividends_obj = obb.equity.calendar.dividends(symbol=symbol, provider=provider)
         df = process_openbb_object(dividends_obj)
         # Ensure 'ex_dividend_date' or 'payment_date' is used as index if available
         if not df.empty:
@@ -155,30 +154,30 @@ def obb_get_dividends(ticker: str, provider: str = "yfinance"): # yfinance for d
                  df['date'] = pd.to_datetime(df['date'])
                  df = df.set_index('date').sort_index()
         return df
-    except Exception as e: print(f"Error fetching dividends for {ticker} with {provider}: {e}"); return pd.DataFrame()
+    except Exception as e: print(f"Error fetching dividends for {symbol} with {provider}: {e}"); return pd.DataFrame()
 
 
-def obb_get_key_metrics(ticker: str, period: Optional[str] = "annual", provider: str = "yfinance"): # limit not always supported
-    print(f"Fetching key metrics for {ticker} (Period: {period}, Provider: {provider})")
+def obb_get_key_metrics(symbol: str, period: Optional[str] = "annual", provider: str = "yfinance"): # limit not always supported
+    print(f"Fetching key metrics for {symbol} (Period: {period}, Provider: {provider})")
     try:
         # The `limit` parameter might not be supported by all providers for metrics
         # If yfinance is provider, it might not take limit.
         # OpenBB often ignores extra kwargs if the provider doesn't use them.
         if provider == "fmp": # FMP uses limit
-             metrics_obj = obb.equity.fundamental.metrics(symbol=ticker, period=period, provider=provider, limit=20 if period else None)
+             metrics_obj = obb.equity.fundamental.metrics(symbol=symbol, period=period, provider=provider, limit=20 if period else None)
         else: # yfinance might not take limit for this specific call, or it's implied
-             metrics_obj = obb.equity.fundamental.metrics(symbol=ticker, period=period, provider=provider)
+             metrics_obj = obb.equity.fundamental.metrics(symbol=symbol, period=period, provider=provider)
 
         df = process_openbb_object(metrics_obj)
         if not df.empty and isinstance(df.index, pd.DatetimeIndex): return df.sort_index()
         return df
-    except Exception as e: print(f"Error fetching key metrics for {ticker} with {provider}: {e}"); return pd.DataFrame()
+    except Exception as e: print(f"Error fetching key metrics for {symbol} with {provider}: {e}"); return pd.DataFrame()
 
-def obb_get_insider_trading(ticker: str, limit: int = 50, provider: str = "fmp"):
+def obb_get_insider_trading(symbol: str, limit: int = 50, provider: str = "fmp"):
     # ... (same as before, with the improved date index handling)
-    print(f"Fetching insider trading for {ticker} (Provider: {provider})")
+    print(f"Fetching insider trading for {symbol} (Provider: {provider})")
     try:
-        insider_obj = obb.equity.ownership.insider_trading(symbol=ticker, limit=limit, provider=provider)
+        insider_obj = obb.equity.ownership.insider_trading(symbol=symbol, limit=limit, provider=provider)
         df = process_openbb_object(insider_obj)
         if not df.empty:
             if 'filing_date' in df.columns and not isinstance(df.index, pd.DatetimeIndex):
@@ -188,37 +187,37 @@ def obb_get_insider_trading(ticker: str, limit: int = 50, provider: str = "fmp")
                 try: df['transaction_date'] = pd.to_datetime(df['transaction_date']); df = df.set_index('transaction_date').sort_index()
                 except Exception as te: print(f"Warn: Could not set 'transaction_date' as index: {te}")
         return df
-    except Exception as e: print(f"Error fetching insider trading for {ticker}: {e}"); return pd.DataFrame()
+    except Exception as e: print(f"Error fetching insider trading for {symbol}: {e}"); return pd.DataFrame()
 
 
 # --- Additional Fundamental/Info Functions ---
 
-def obb_get_market_snapshot(ticker: str, provider: str = "fmp"):
+def obb_get_market_snapshot(symbol: str, provider: str = "fmp"):
     """
     Fetch current market snapshot (price, market cap, P/E, 52w high/low, etc.).
     """
-    print(f"Fetching market snapshot for {ticker} (Provider: {provider})")
+    print(f"Fetching market snapshot for {symbol} (Provider: {provider})")
     try:
-        snapshot_obj = obb.equity.market_snapshots(symbol=ticker, provider=provider)
+        snapshot_obj = obb.equity.market_snapshots(symbol=symbol, provider=provider)
         df = process_openbb_object(snapshot_obj)
         return df
     except Exception as e:
-        print(f"Error fetching market snapshot for {ticker}: {e}")
+        print(f"Error fetching market snapshot for {symbol}: {e}")
         return pd.DataFrame()
 
-def obb_get_valuation_multiples(ticker: str, period: str = "annual", provider: str = "fmp"):
+def obb_get_valuation_multiples(symbol: str, period: str = "annual", provider: str = "fmp"):
     """
     Fetch valuation multiples (P/E, EV/EBITDA, P/S, P/B, etc.) as time series.
     """
-    print(f"Fetching valuation multiples for {ticker} (Period: {period}, Provider: {provider})")
+    print(f"Fetching valuation multiples for {symbol} (Period: {period}, Provider: {provider})")
     try:
-        multiples_obj = obb.equity.fundamental.multiples(symbol=ticker, period=period, provider=provider)
+        multiples_obj = obb.equity.fundamental.multiples(symbol=symbol, period=period, provider=provider)
         df = process_openbb_object(multiples_obj)
         if not df.empty and isinstance(df.index, pd.DatetimeIndex):
             return df.sort_index()
         return df
     except Exception as e:
-        print(f"Error fetching valuation multiples for {ticker}: {e}")
+        print(f"Error fetching valuation multiples for {symbol}: {e}")
         return pd.DataFrame()
 
 
@@ -243,77 +242,103 @@ def obb_get_earnings_calendar(country: str = "us"):
 
 # --- ETF-specific Functions ---
 
-def obb_get_etf_info(ticker: str):
-    """
-    Fetch basic ETF info (AUM, expense ratio, inception date, ISIN, etc.).
-    """
-    print(f"Fetching ETF info for {ticker}")
+def obb_get_etf_info(symbol: str, provider: Optional[str] = "yfinance"): # yfinance is often good for basic info
+    log_msg = f"Fetching ETF info for {symbol}"
+    kwargs_for_obb = {"symbol": symbol}
+    if provider:
+        kwargs_for_obb["provider"] = provider
+        log_msg += f" (Provider: {provider})"
+    else:
+        log_msg += f" (Provider: OBB Default)" # Letting OBB choose
+    print(log_msg)
     try:
-        info_obj = obb.etf.info(symbol=ticker)
+        info_obj = obb.etf.info(**kwargs_for_obb)
         df = process_openbb_object(info_obj)
         return df
     except Exception as e:
-        print(f"Error fetching ETF info for {ticker}: {e}")
+        print(f"Error fetching ETF info for {symbol} with provider '{kwargs_for_obb.get('provider', 'OBB Default')}': {e}")
         return pd.DataFrame()
 
-def obb_get_etf_holdings(ticker: str):
-    """
-    Fetch current holdings of an ETF (symbol, weight, market value, sector, etc.).
-    """
-    print(f"Fetching ETF holdings for {ticker}")
+def obb_get_etf_holdings(symbol: str, provider: Optional[str] = None, limit: Optional[int] = None):
+    # Based on coverage, 'yfinance' is NOT a provider for obb.etf.holdings.
+    # We let OpenBB try its default, or if 'fmp'/'sec' is passed, it will try that.
+    log_msg = f"Fetching ETF holdings for {symbol}"
+    kwargs_for_obb = {"symbol": symbol}
+    actual_provider_for_log = "OBB Default"
+    if provider:
+        kwargs_for_obb["provider"] = provider
+        actual_provider_for_log = provider
+    log_msg += f" (Provider: {actual_provider_for_log})"
+    if limit is not None:
+        kwargs_for_obb["limit"] = limit
+        log_msg += f" (Limit: {limit})"
+    print(log_msg)
     try:
-        holdings_obj = obb.etf.holdings(symbol=ticker)
+        holdings_obj = obb.etf.holdings(**kwargs_for_obb)
         df = process_openbb_object(holdings_obj)
-        if not df.empty and 'date' in df.columns:
-            try:
-                df['date'] = pd.to_datetime(df['date'])
-                df = df.set_index('date').sort_index()
-            except Exception as de:
-                print(f"Warn: Could not convert 'date' col in ETF holdings: {de}")
         return df
     except Exception as e:
-        print(f"Error fetching ETF holdings for {ticker}: {e}")
+        print(f"Error fetching ETF holdings for {symbol} with provider '{actual_provider_for_log}': {e}")
+        try:
+            supported = obb.coverage.providers(command="etf.holdings")
+            print(f"Hint: Supported providers by OBB for etf.holdings: {supported}")
+        except: pass
         return pd.DataFrame()
 
-def obb_get_etf_country_exposure(ticker: str):
-    """
-    Fetch ETF country exposure breakdown (weights by country).
-    """
-    print(f"Fetching ETF country exposure for {ticker}")
+def obb_get_etf_country_exposure(symbol: str, provider: Optional[str] = "fmp"): # Default to FMP as it's listed
+    log_msg = f"Fetching ETF country exposure for {symbol}"
+    kwargs_for_obb = {"symbol": symbol}
+    actual_provider_for_log = "OBB Default"
+    if provider:
+        kwargs_for_obb["provider"] = provider
+        actual_provider_for_log = provider
+    log_msg += f" (Provider: {actual_provider_for_log})"
+    print(log_msg)
     try:
-        countries_obj = obb.etf.countries(symbol=ticker)
+        countries_obj = obb.etf.countries(**kwargs_for_obb)
         df = process_openbb_object(countries_obj)
         return df
     except Exception as e:
-        print(f"Error fetching ETF country exposure for {ticker}: {e}")
+        print(f"Error fetching ETF country exposure for {symbol} with provider '{actual_provider_for_log}': {e}")
+        try:
+            supported = obb.coverage.providers(command="etf.countries")
+            print(f"Hint: Supported providers for etf.countries by OBB: {supported}")
+        except: pass
         return pd.DataFrame()
 
-def obb_get_etf_sector_exposure(ticker: str):
-    """
-    Fetch ETF sector exposure breakdown (weights by sector).
-    """
-    print(f"Fetching ETF sector exposure for {ticker}")
+def obb_get_etf_sector_exposure(symbol: str, provider: Optional[str] = "fmp"): # Default to FMP as it's listed
+    log_msg = f"Fetching ETF sector exposure for {symbol}"
+    kwargs_for_obb = {"symbol": symbol}
+    actual_provider_for_log = "OBB Default"
+    if provider:
+        kwargs_for_obb["provider"] = provider
+        actual_provider_for_log = provider
+    log_msg += f" (Provider: {actual_provider_for_log})"
+    print(log_msg)
     try:
-        sectors_obj = obb.etf.sectors(symbol=ticker)
+        sectors_obj = obb.etf.sectors(**kwargs_for_obb)
         df = process_openbb_object(sectors_obj)
         return df
     except Exception as e:
-        print(f"Error fetching ETF sector exposure for {ticker}: {e}")
+        print(f"Error fetching ETF sector exposure for {symbol} with provider '{actual_provider_for_log}': {e}")
+        try:
+            supported = obb.coverage.providers(command="etf.sectors")
+            print(f"Hint: Supported providers for etf.sectors by OBB: {supported}")
+        except: pass
         return pd.DataFrame()
 
-def obb_get_etf_historical_price(ticker: str, start_date: str, end_date: str, interval: str = "1d"):
-    """
-    Fetch historical price for an ETF (uses equity.price.historical under the hood).
-    """
-    print(f"Fetching historical price for ETF {ticker} from {start_date} to {end_date} (Interval: {interval})")
+# obb_get_etf_historical_price is already fine as it calls obb.equity.price.historical,
+# which does take a provider argument (though yfinance is usually the default/only free one).
+# You can keep its signature as is or make provider optional if you usually let OBB default for prices.
+def obb_get_etf_historical_price(symbol: str, start_date: str, end_date: str, interval: str = "1d", provider: str = "yfinance"): # provider default yfinance
+    print(f"Fetching historical price for ETF {symbol} from {start_date} to {end_date} (Interval: {interval}, Provider: {provider})")
     try:
-        price_obj = obb.equity.price.historical(symbol=ticker, interval=interval, start_date=start_date, end_date=end_date)
+        price_obj = obb.equity.price.historical(symbol=symbol, interval=interval, start_date=start_date, end_date=end_date, provider=provider)
         df = process_openbb_object(price_obj)
         return df
     except Exception as e:
-        print(f"Error fetching ETF historical price for {ticker}: {e}")
+        print(f"Error fetching ETF historical price for {symbol}: {e}")
         return pd.DataFrame()
-
 
 # --- Google Trends function (remains the same, including the pytrends fallback) ---
 def obb_get_google_trends(keyword: str, start_date: str, end_date: str):
