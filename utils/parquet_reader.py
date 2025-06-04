@@ -8,6 +8,20 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DATA_BASE_PATH = os.path.join(PROJECT_ROOT, "project_data")
 PRICE_DATA_PATH = os.path.join(DATA_BASE_PATH, "price_data")
 SENTIMENT_DATA_PATH = os.path.join(DATA_BASE_PATH, "sentiment_data")
+TRENDS_DATA_PATH = os.path.join(DATA_BASE_PATH, "trends_data")
+
+FUNDAMENTALS_DATA_PATH = os.path.join(DATA_BASE_PATH, "fundamentals_data")
+PROFILE_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "profile")
+RATIOS_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "ratios")
+INCOME_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "income_statements")
+BALANCE_SHEET_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "balance_sheets")
+CASH_FLOW_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "cash_flows")
+KEY_METRICS_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "key_metrics")
+DIVIDENDS_DATA_PATH = os.path.join(FUNDAMENTALS_DATA_PATH, "dividends")
+
+ETF_BASE_PATH = os.path.join(DATA_BASE_PATH, "etf_data")
+ETF_INFO_PATH = os.path.join(ETF_BASE_PATH, "info")
+ETF_HOLDINGS_PATH = os.path.join(ETF_BASE_PATH, "holdings")
 
 def inspect_parquet_file(file_path):
     """Loads and prints info about a single Parquet file."""
@@ -61,6 +75,82 @@ def inspect_all_parquet_in_directory(directory_path, file_pattern="*.parquet"):
     for file_path in sorted(parquet_files): # Sort for consistent order
         inspect_parquet_file(file_path)
         print("-" * 50)
+
+
+# ─── Helper: Dynamically build the dictionary of folders to scan ───────────────
+def build_paths_to_check(project_root: str):
+    """
+    Walks through project_data/ and returns a dict of {label: folder_path}, including:
+      • top-level folders (price_data, sentiment_data, trends_data)
+      • subfolders under fundamentals_data (labeled "Fundamentals – <subfolder>")
+      • subfolders under etf_data (labeled "ETF – <subfolder>")
+    """
+    data_base = os.path.join(project_root, "project_data")
+    paths = {}
+
+    # First, list everything directly under project_data
+    for entry in sorted(os.listdir(data_base)):
+        full_path = os.path.join(data_base, entry)
+        if not os.path.isdir(full_path):
+            continue
+
+        # If it's fundamentals_data, inspect one level deeper
+        if entry == "fundamentals_data":
+            fund_base = full_path
+            for fund_sub in sorted(os.listdir(fund_base)):
+                sub_path = os.path.join(fund_base, fund_sub)
+                if os.path.isdir(sub_path):
+                    label = f"Fundamentals – {fund_sub}"
+                    paths[label] = sub_path
+
+        # If it's etf_data, inspect one level deeper
+        elif entry == "etf_data":
+            etf_base = full_path
+            for etf_sub in sorted(os.listdir(etf_base)):
+                sub_path = os.path.join(etf_base, etf_sub)
+                if os.path.isdir(sub_path):
+                    label = f"ETF – {etf_sub}"
+                    paths[label] = sub_path
+
+        # Otherwise, register it as a top-level folder (e.g. price_data, sentiment_data, trends_data)
+        else:
+            # Use a more human-friendly label if you like
+            nice_label = entry.replace("_", " ").title()
+            paths[nice_label] = full_path
+
+    return paths
+
+
+# ─── Main function: inspect only files matching a ticker ───────────────────────
+def inspect_ticker_data(ticker: str):
+    """
+    Inspect all Parquet files containing `ticker` in their filename,
+    across each of the data subdirectories discovered dynamically.
+    """
+    # Derive PROJECT_ROOT (adjust if this file isn't in a child of project root)
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    # Build the dict of labels → folder paths
+    paths_to_check = build_paths_to_check(PROJECT_ROOT)
+
+    # Loop over each folder and glob for "*{ticker}*.parquet"
+    for label, folder in paths_to_check.items():
+        if not os.path.isdir(folder):
+            print(f"\n-- Skipping (folder not found): {folder}")
+            continue
+
+        pattern = os.path.join(folder, f"*{ticker}*.parquet")
+        matched_files = sorted(glob.glob(pattern))
+
+        print(f"\n{'='*10} {label} ({folder}) {'='*10}")
+        if not matched_files:
+            print(f"No files matching '*{ticker}*.parquet' in {folder}")
+            continue
+
+        for fp in matched_files:
+            inspect_parquet_file(fp)
+            print("-" * 50)
+
 
 if __name__ == "__main__":
     # --- Choose what to inspect ---
